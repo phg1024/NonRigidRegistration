@@ -19,7 +19,7 @@ landmarks = landmarks.landmarks + 1;
 %figure;showMeshWithLandmarks(T, landmarks, 'target');
 
 % sample points from the target mesh as point cloud
-npoints = 1024;
+npoints = 128;
 point_cloud = samplePointsFromMesh(T, landmarks, npoints);
 
 figure;showMeshWithPointCloud(T, point_cloud, 'Point Cloud');
@@ -27,7 +27,7 @@ figure;showMeshWithPointCloud(T, point_cloud, 'Point Cloud');
 lm_points = T.vertices(landmarks,:);
 
 tic;
-Td = laplacianDeformation(S, T, landmarks, lm_points, point_cloud);
+Td = laplacianDeformation(S, landmarks, lm_points, point_cloud);
 toc;
 
 figure;showMeshWithLandmarks(S, landmarks, 'source');
