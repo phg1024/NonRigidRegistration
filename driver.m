@@ -11,3 +11,27 @@ target_mesh_path = 'C:\Users\Peihong\Desktop\Data\FaceWarehouse_Data_0\Tester_1\
 
 S = triangulateMesh(loadMesh(template_mesh_path));
 T = triangulateMesh(loadMesh(target_mesh_path));
+
+landmarks = load('landmarks.mat');
+landmarks = landmarks.landmarks + 1;
+
+%figure;showMeshWithLandmarks(S, landmarks, 'source');
+%figure;showMeshWithLandmarks(T, landmarks, 'target');
+
+% sample points from the target mesh as point cloud
+npoints = 1024;
+point_cloud = samplePointsFromMesh(T, landmarks, npoints);
+
+figure;showMeshWithPointCloud(T, point_cloud, 'Point Cloud');
+
+lm_points = T.vertices(landmarks,:);
+
+tic;
+Td = laplacianDeformation(S, T, landmarks, lm_points, point_cloud);
+toc;
+
+figure;showMeshWithLandmarks(S, landmarks, 'source');
+figure;showMeshWithLandmarks(T, landmarks, 'target');
+figure;showMeshWithLandmarks(Td, landmarks, 'deformed');
+figure;showMeshOverlay(Td, T, 'overlay');
+figure;showMeshError(Td, T, 'error');
