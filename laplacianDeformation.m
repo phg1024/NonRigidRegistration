@@ -2,11 +2,6 @@ function Td = laplacianDeformation(S, landmarks, lm_points, point_cloud)
 
 Td = S;
 
-w_icp = 0.0;
-w_data = 1.0;
-w_dist = 1.0;
-
-
 [nverts, ~] = size(S.vertices);
 [nfaces, ~] = size(S.faces);
 
@@ -47,21 +42,27 @@ for i=1:nverts
     A{i} = [Vi;Ai];
 end
 
-w_icp_step = 0.0; E_total = realmax;
+w_icp_step = size(lm_points, 1) / size(point_cloud, 1); E_total = realmax;
+%w_dist_step = 100.0 * size(lm_points, 1) / size(Td.vertices, 1);
+w_icp = 0.0;
+w_data = 1.0;
+%w_dist = 10.0*w_dist_step;
+w_dist = 1.0;
 iters = 0; eps1 = 1e-5; eps2 = 1e-8;
-itmax = 5;
+itmax = 10;
 while iters < itmax    
     iters = iters + 1;
     fprintf('iteration %d\n', iters);
     
     % find icp correspondence
-    icp_correspondence = findClosestPoints(point_cloud, Td);
+    [icp_correspondence, icp_weights] = findClosestPoints(point_cloud, Td);
     
-    figure; hold on;
-    showMeshWithPointCloud(Td, point_cloud, 'Point Cloud');
-    plot3(Td.vertices(icp_correspondence,1), Td.vertices(icp_correspondence,2), Td.vertices(icp_correspondence,3), 'ro');
-    hold off;
-    pause;
+%     figure; plot(icp_weights);
+%     
+%     figure; hold on;
+%     showMeshWithPointCloud(Td, point_cloud, 'Point Cloud');
+%     plot3(Td.vertices(icp_correspondence,1), Td.vertices(icp_correspondence,2), Td.vertices(icp_correspondence,3), 'ro');
+%     hold off;
     
     % compute error
     % data term
@@ -71,6 +72,7 @@ while iters < itmax
     % total error
     E0 = E_total;
     E_total = E_data + E_icp;
+    E(iters) = E_total;
     E_diff = abs(E_total - E0);
     fprintf('E = %.6f\n', E_total);
     if E_total < eps1 || E_diff < eps2
@@ -82,16 +84,16 @@ while iters < itmax
     disp('assembling icp term');
     nicp = size(point_cloud, 1); 
     M_icp_i = zeros(1, nicp*3); M_icp_j = zeros(1, nicp*3); M_icp_v = zeros(1, nicp*3);
-    b_icp = reshape(point_cloud', 3*nicp, 1);
+    b_icp = reshape((point_cloud .* repmat(icp_weights, 1, 3))', 3*nicp, 1);
     idx = 1;
     for i=1:nicp
         dstart = (icp_correspondence(i)-1)*3;
-        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+1; M_icp_v(idx) = 1; idx = idx + 1;
-        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+2; M_icp_v(idx) = 1; idx = idx + 1;
-        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+3; M_icp_v(idx) = 1; idx = idx + 1;
+        wi = icp_weights(i);
+        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+1; M_icp_v(idx) = wi; idx = idx + 1;
+        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+2; M_icp_v(idx) = wi; idx = idx + 1;
+        M_icp_i(idx) = idx; M_icp_j(idx) = dstart+3; M_icp_v(idx) = wi; idx = idx + 1;
     end
     M_icp = sparse(M_icp_i, M_icp_j, M_icp_v, 3*nicp, nverts*3);
-    figure;spy(M_icp);
     
     % data term
     disp('assembling data term');
@@ -163,7 +165,7 @@ while iters < itmax
     
     disp('sovling least square problem');
     M = [M_data * w_data; M_icp * w_icp; M_dist * w_dist];
-    b = [b_data; b_icp; b_dist];
+    b = [b_data * w_data; b_icp * w_icp; b_dist * w_dist];
     
     v_new = (M'*M) \ (M'*b);
     v_new = reshape(v_new, 3, nverts)';
@@ -172,8 +174,12 @@ while iters < itmax
     Td.vertices = v_new;
     
     % increase w_icp
-    w_icp = w_icp + w_icp_step;
+    w_icp = iters * w_icp_step;
+    % decrease w_dist
+    %w_dist = w_dist - w_dist_step;
 end
+
+figure;plot(log10(E), '-x');title('Error');xlabel('iteration');ylabel('log(error)');
 
 end
 
