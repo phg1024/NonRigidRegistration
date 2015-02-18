@@ -1,4 +1,4 @@
-function Td = laplacianDeformation(S, landmarks, lm_points, point_cloud)
+function Td = laplacianDeformation(S, landmarks, lm_points, point_cloud, opts)
 
 Td = S;
 
@@ -30,10 +30,12 @@ end
 
 % compute the A matrices
 A = cell(nverts, 1);
-for i=1:nverts
+ndistortion = 0;
+for i=1:nverts    
     Vi = [v(i,:)', skewMatrix(v), eye(3)];
     Ai= zeros(3*length(Ni), 7);
     Ni = N{i};
+    ndistortion = ndistortion + length(Ni) + 1;
     for j=1:length(Ni)
         jstart = (j-1)*3+1; jend=j*3;
         vij = v(Ni(j),:)';
@@ -41,15 +43,26 @@ for i=1:nverts
     end
     A{i} = [Vi;Ai];
 end
+ndistortion
+
+T = cell(nverts, 1);
+for i=1:nverts
+    Di = makeDmatrix(delta(i,:));
+    T{i} = Di * ((A{i}'*A{i}) \ A{i}');
+end
 
 w_icp_step = size(lm_points, 1) / size(point_cloud, 1); E_total = realmax;
+%w_data_step = 10.0;
 %w_dist_step = 100.0 * size(lm_points, 1) / size(Td.vertices, 1);
+w_dist_step = 10.0;
 w_icp = 0.0;
 w_data = 1.0;
-%w_dist = 10.0*w_dist_step;
-w_dist = 1.0;
+w_dist = 100.0;
+w_prior = 0.1;
+w_prior_step = 0.0095;
 iters = 0; eps1 = 1e-5; eps2 = 1e-8;
 itmax = 10;
+
 while iters < itmax    
     iters = iters + 1;
     fprintf('iteration %d\n', iters);
@@ -109,33 +122,50 @@ while iters < itmax
     end
     M_data = sparse(M_data_i, M_data_j, M_data_v, 3*ndata, nverts*3);
     
+    % prior term
+    disp('assembling prior term');
+    static_verts = setdiff(1:nverts, icp_correspondence);
+    nstatics = length(static_verts);
+    M_prior_i = zeros(1, nstatics*3); M_prior_j = zeros(1, nstatics*3); M_prior_v = zeros(1, nstatics*3);
+    b_prior = zeros(nstatics*3, 1);
+    idx = 1;
+    for i=1:nstatics
+        jstart = (static_verts(i)-1)*3;
+        M_prior_i(idx) = idx; M_prior_j(idx) = jstart+1; M_prior_v(idx) = 1; b_prior(idx) = S.vertices(static_verts(i), 1); idx = idx + 1;
+        M_prior_i(idx) = idx; M_prior_j(idx) = jstart+2; M_prior_v(idx) = 1; b_prior(idx) = S.vertices(static_verts(i), 2); idx = idx + 1;
+        M_prior_i(idx) = idx; M_prior_j(idx) = jstart+3; M_prior_v(idx) = 1; b_prior(idx) = S.vertices(static_verts(i), 3); idx = idx + 1;
+    end
+    M_prior = sparse(M_prior_i, M_prior_j, M_prior_v, 3*nstatics, nverts*3);
+    
+    % distortion term
     disp('assembling distortion term');
-    M_dist_i = zeros(1, nverts*27); M_dist_j = zeros(1, nverts*27); M_dist_v = zeros(1, nverts*27);
+    M_dist_i = zeros(1, ndistortion*9); M_dist_j = zeros(1, ndistortion*9); M_dist_v = zeros(1, ndistortion*9);
     b_dist = zeros(nverts*3, 1);
     idx = 1;
     for i=1:nverts
-        Ti = makeDmatrix(delta(i,:)) * ((A{i}'*A{i}) \ A{i}');
+        Ti = T{i};
         Ni = N{i};
         
         istart = (i-1)*3;
         % vi
         % laplacian part
-        M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+1; M_dist_v(idx) = 1; idx = idx + 1;
-        M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+2; M_dist_v(idx) = 1; idx = idx + 1;
-        M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+3; M_dist_v(idx) = 1; idx = idx + 1;
+        % merged into the deformation part
+%         M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+1; M_dist_v(idx) = 1; idx = idx + 1;
+%         M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+2; M_dist_v(idx) = 1; idx = idx + 1;
+%         M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+3; M_dist_v(idx) = 1; idx = idx + 1;
         
         % deformation part
-        M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+1; M_dist_v(idx) = -Ti(1, 1); idx = idx + 1;
+        M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+1; M_dist_v(idx) = 1-Ti(1, 1); idx = idx + 1;
         M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+2; M_dist_v(idx) = -Ti(1, 2); idx = idx + 1;
         M_dist_i(idx) = istart+1; M_dist_j(idx) = istart+3; M_dist_v(idx) = -Ti(1, 3); idx = idx + 1;
         
         M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+1; M_dist_v(idx) = -Ti(2, 1); idx = idx + 1;
-        M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+2; M_dist_v(idx) = -Ti(2, 2); idx = idx + 1;
+        M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+2; M_dist_v(idx) = 1-Ti(2, 2); idx = idx + 1;
         M_dist_i(idx) = istart+2; M_dist_j(idx) = istart+3; M_dist_v(idx) = -Ti(2, 3); idx = idx + 1;
         
         M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+1; M_dist_v(idx) = -Ti(3, 1); idx = idx + 1;
         M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+2; M_dist_v(idx) = -Ti(3, 2); idx = idx + 1;
-        M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+3; M_dist_v(idx) = -Ti(3, 3); idx = idx + 1;
+        M_dist_i(idx) = istart+3; M_dist_j(idx) = istart+3; M_dist_v(idx) = 1-Ti(3, 3); idx = idx + 1;
         
         % N(vi)
         w = -1.0 / length(Ni);
@@ -143,31 +173,35 @@ while iters < itmax
             jstart = (Ni(j)-1)*3;
             
             % laplacian part
-            M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+1; M_dist_v(idx) = w; idx = idx + 1;
-            M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+2; M_dist_v(idx) = w; idx = idx + 1;
-            M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+3; M_dist_v(idx) = w; idx = idx + 1;
+            % merged into the deformation part
+%             M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+1; M_dist_v(idx) = w; idx = idx + 1;
+%             M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+2; M_dist_v(idx) = w; idx = idx + 1;
+%             M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+3; M_dist_v(idx) = w; idx = idx + 1;
             
             % deformation part
-            M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+1; M_dist_v(idx) = -Ti(1, j*3+1); idx = idx + 1;
+            M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+1; M_dist_v(idx) = w-Ti(1, j*3+1); idx = idx + 1;
             M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+2; M_dist_v(idx) = -Ti(1, j*3+2); idx = idx + 1;
             M_dist_i(idx) = istart+1; M_dist_j(idx) = jstart+3; M_dist_v(idx) = -Ti(1, j*3+3); idx = idx + 1;
             
             M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+1; M_dist_v(idx) = -Ti(2, j*3+1); idx = idx + 1;
-            M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+2; M_dist_v(idx) = -Ti(2, j*3+2); idx = idx + 1;
+            M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+2; M_dist_v(idx) = w-Ti(2, j*3+2); idx = idx + 1;
             M_dist_i(idx) = istart+2; M_dist_j(idx) = jstart+3; M_dist_v(idx) = -Ti(2, j*3+3); idx = idx + 1;
             
             M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+1; M_dist_v(idx) = -Ti(3, j*3+1); idx = idx + 1;
             M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+2; M_dist_v(idx) = -Ti(3, j*3+2); idx = idx + 1;
-            M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+3; M_dist_v(idx) = -Ti(3, j*3+3); idx = idx + 1;
+            M_dist_i(idx) = istart+3; M_dist_j(idx) = jstart+3; M_dist_v(idx) = w-Ti(3, j*3+3); idx = idx + 1;
         end
     end
+    ndistortion*9
+    length(M_dist_i)
     M_dist = sparse(M_dist_i, M_dist_j, M_dist_v, nverts*3, nverts*3);
     
     disp('sovling least square problem');
-    M = [M_data * w_data; M_icp * w_icp; M_dist * w_dist];
-    b = [b_data * w_data; b_icp * w_icp; b_dist * w_dist];
+    M = [M_data * w_data; M_icp * w_icp; M_dist * w_dist; M_prior * w_prior];
+    b = [b_data * w_data; b_icp * w_icp; b_dist * w_dist; b_prior * w_prior];
     
     v_new = (M'*M) \ (M'*b);
+    %v_new = bicgstab(M'*M, M'*b, 1e-6, 16, [], [], reshape(v, 3*nverts, 1));
     v_new = reshape(v_new, 3, nverts)';
     disp('done');
     
@@ -175,8 +209,12 @@ while iters < itmax
     
     % increase w_icp
     w_icp = iters * w_icp_step;
+    % decrease w_data
+    %w_data = (itmax-iters) * w_data_step;
     % decrease w_dist
-    %w_dist = w_dist - w_dist_step;
+    w_dist = sqrt((itmax-iters) * w_dist_step);
+    % decrease w_prior
+    w_prior = (itmax-iters) * w_prior_step;
 end
 
 figure;plot(log10(E), '-x');title('Error');xlabel('iteration');ylabel('log(error)');

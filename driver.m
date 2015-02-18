@@ -15,28 +15,48 @@ landmarks = landmarks.landmarks + 1;
 
 figure;showMeshWithLandmarks(S, landmarks, 'source');
 
-for i=1:18
-tgt_mesh_file = [target_mesh_path, 'pose_', num2str(i), '.obj']
-T = triangulateMesh(loadMesh(tgt_mesh_file));
+start_mesh = 1;
+nmeshes = 1;
+meshes_per_batch = 1;
+
+finished = false;
+batchidx = 1;
+while ~finished
+
+first_mesh = (batchidx-1)*meshes_per_batch+1;
+last_mesh = min(batchidx*meshes_per_batch, nmeshes);
+
+if first_mesh > nmeshes
+    break;
+end
+
+parfor i=first_mesh:last_mesh
+tgt_mesh_file{i} = [target_mesh_path, 'pose_', num2str(i), '.obj']
+T{i} = triangulateMesh(loadMesh(tgt_mesh_file{i}));
 
 %figure;showMeshWithLandmarks(S, landmarks, 'source');
 %figure;showMeshWithLandmarks(T, landmarks, 'target');
 
 % sample points from the target mesh as point cloud
-npoints = 3000;
-point_cloud = samplePointsFromMesh(T, landmarks, npoints);
+npoints = 16384;
+%point_cloud = samplePointsFromMesh(T, landmarks, npoints);
+point_cloud{i} = samplePointsFromMesh2(T{i}, npoints, 1e-2);
 
-figure;showMeshWithPointCloud(T, point_cloud, 'Point Cloud');
+figure;showMeshWithPointCloud(T{i}, point_cloud{i}, 'Point Cloud');
 
-lm_points = T.vertices(landmarks,:);
+lm_points{i} = T{i}.vertices(landmarks,:);
 
 tic;
-Td = laplacianDeformation(S, landmarks, lm_points, point_cloud);
+Td{i} = laplacianDeformation(S, landmarks, lm_points{i}, point_cloud{i});
 toc;
+end
 
-figure;showMeshWithLandmarks(T, landmarks, ['target ', num2str(i)]); print('-dpng','-r300',['target ', num2str(i)]);
-figure;showMeshWithLandmarks(Td, landmarks, ['deformed ', num2str(i)]); print('-dpng','-r300',['deformed ', num2str(i)]);
-figure;showMeshOverlay(Td, T, ['overlay ', num2str(i)]); print('-dpng','-r300',['overlay ', num2str(i)]);
-figure;showMeshError(Td, T, ['error ', num2str(i)]); print('-dpng','-r300',['error ', num2str(i)]);
+for i=first_mesh:last_mesh
+figure;showMeshWithLandmarks(T{i}, landmarks, ['target ', num2str(i)]); print('-dpng','-r300',['target ', num2str(i)]);
+figure;showMeshWithLandmarks(Td{i}, landmarks, ['deformed ', num2str(i)]); print('-dpng','-r300',['deformed ', num2str(i)]);
+figure;showMeshOverlay(Td{i}, T{i}, ['overlay ', num2str(i)]); print('-dpng','-r300',['overlay ', num2str(i)]);
+figure;showMeshError(Td{i}, T{i}, ['error ', num2str(i)]); print('-dpng','-r300',['error ', num2str(i)]);
+end
 
+batchidx = batchidx + 1;
 end

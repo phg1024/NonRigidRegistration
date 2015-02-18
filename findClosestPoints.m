@@ -32,6 +32,9 @@ for i=1:nverts
     vertNormal(i,:) = normalize(vertNormal(i,:));
 end
 
+% normal orientation
+normalOrient = sum(vertNormal .* repmat([0, 0, 1], nverts, 1), 2);
+
 % find correspondence
 dist = zeros(nverts, npoints);
 for i=1:npoints
@@ -40,10 +43,18 @@ end
 dist = abs(dist);
 
 % for each column, find the minimum row
-[~, correspondence] = min(dist);
+[minDists, correspondence] = min(dist);
 
 % find the weights for each point
 weights = abs(sum((vertNormal(correspondence, :) .* normalizeMatrix((S.vertices(correspondence, :) - points))), 2));
+
+% eliminate bad correspondance
+% distance thresholding
+distCutoff = 0.10;
+weights(minDists>distCutoff) = 0;
+
+% bad normal elimination
+weights(normalOrient(correspondence)>=0) = 0;
 
 end
 
